@@ -233,6 +233,7 @@ LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 			int selectedIndex = SendMessageW(hComboBox, CB_GETCURSEL, 0, 0);
 			defaultCrosshairIndex = selectedIndex;
 			//change json file data
+			//update window that displays defaultCrosshair
 		}
 		break;
 	}
