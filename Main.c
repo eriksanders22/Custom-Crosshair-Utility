@@ -30,6 +30,7 @@ black is keyed out for transparency
 #define SELECT_FILE1 1 //combox box ID
 #define ON_OFF_BUTTON 2 //On off button ID
 #define TOGGLE_DEFAULT_BUTTON 3 //Toggle default setting crosshair
+#define DEFAULT_DISPLAY_TEXT 4 //text that displays current default
 #define ID_IMAGE 1001 //ID for the child class that displays the image on top of the transparent window
 #define DEFAULT_CROSSHAIR_NUM 3 //number of default crosshairs
 #define JSON_FILE_PATH "config.json" //config file
@@ -38,7 +39,9 @@ LRESULT CALLBACK WindProc(HWND, UINT, WPARAM, LPARAM); //main window proc
 LRESULT CALLBACK OverlayWindowProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp); //transparent overlay window proc
 void readInputFiles(const char* folderPath, char*** inputCrosshair, int* fileCount); //reads every file in the crosshairs folder and puts it into the InputCrosshair array
 void loadCrosshairImage(); //loads the image used to show the crosshair
-void loadJSONData(); //loads the user settings from config.json
+void loadJSONData(); //loads the user settings from config.json into a cJSON object
+void updateJSONData(); //changes data in the cJSON object that is created
+void writeJSONData(); //writes data from cJSON object into config.json
 
 char** inputCrosshair = NULL; //list of file names in the crosshairs folder
 int fileCount = 0; //list of crosshair files from Crosshairs folder
@@ -95,9 +98,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	ShowWindow(hOverlayWindow, cmdShow);
 	UpdateWindow(hOverlayWindow);
 
+	//load JSON data
+	loadJSONData();
+
 	//set default crosshair index
 	cJSON* crosshairNode = cJSON_GetObjectItem(root, "defaultCrosshair");
-	if (cJSON_IsString(crosshairNode)) {
+	if (cJSON_IsNumber(crosshairNode)) {
 		defaultCrosshairIndex = crosshairNode->valueint;
 	}
 
@@ -105,6 +111,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	HWND hTitle = CreateWindowW(L"static", L"Custom Crosshair Utility", WS_VISIBLE | WS_CHILD, 200, 50, 170, 25, hWnd, NULL, hInstance, NULL); //title window
 	HWND hOnOffButton = CreateWindowW(L"Button", L"Toggle Crosshair", WS_VISIBLE | WS_CHILD, 200, 400, 150, 50, hWnd, (HMENU) ON_OFF_BUTTON, hInstance, NULL); //on off button
 	HWND hToggleDefault = CreateWindowW(L"Button", L"Set as Default", WS_VISIBLE | WS_CHILD, 200, 500, 150, 25, hWnd, (HMENU) TOGGLE_DEFAULT_BUTTON, hInstance, NULL); //set current crosshair as default
+	HWND hDefaultText = CreateWindowW(L"static", L"Hello", WS_VISIBLE | WS_CHILD, 200, 600, 200, 25, hWnd, (HMENU) DEFAULT_DISPLAY_TEXT, hInstance, NULL); //displays defaultCrosshairIndex
 	HWND hDropdown = CreateWindowW(L"COMBOBOX", NULL, WS_VISIBLE | WS_CHILD | CBS_DROPDOWN | CBS_HASSTRINGS | WS_VSCROLL,
 	200, 100, 150, 120, hWnd, (HMENU)SELECT_FILE1, hInstance, NULL); //dropdown
 
@@ -144,8 +151,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	readInputFiles(folderPath, &inputCrosshair, &fileCount);
 
 	//sets the default image path
-	strcpy_s(imagePath, sizeof(imagePath), "Crosshairs\\\\");
-	strcat_s(imagePath, sizeof(imagePath), inputCrosshair[defaultCrosshairIndex]);
+	if (defaultCrosshairIndex < DEFAULT_CROSSHAIR_NUM) {
+		strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\\\");
+		strcat_s(imagePath, sizeof(imagePath), "cat.bmp");
+	}
+	else {
+		strcpy_s(imagePath, sizeof(imagePath), "Crosshairs\\\\");
+		strcat_s(imagePath, sizeof(imagePath), inputCrosshair[defaultCrosshairIndex-DEFAULT_CROSSHAIR_NUM]);
+	}
+	
 
 	//load image for the initial selection
 	loadCrosshairImage();
@@ -192,15 +206,15 @@ LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 			if (selectedIndex < DEFAULT_CROSSHAIR_NUM) {
 				switch (selectedIndex) {
 				case 0:
-					strcpy_s(imagePath, sizeof(imagePath), "Images\\");
+					strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
 					strcat_s(imagePath, sizeof(imagePath), "cat.bmp");
 					break;
 				case 1:
-					strcpy_s(imagePath, sizeof(imagePath), "Images\\");
+					strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
 					strcat_s(imagePath, sizeof(imagePath), "dog.bmp");
 					break;
 				case 2:
-					strcpy_s(imagePath, sizeof(imagePath), "Images\\");
+					strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
 					strcat_s(imagePath, sizeof(imagePath), "frog.bmp");
 					break;
 				}
@@ -229,11 +243,31 @@ LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 			InvalidateRect(hOverlayImage, NULL, TRUE);
 		}
 		if (HIWORD(wp) == BN_CLICKED && (HWND)lp == GetDlgItem(hWnd, TOGGLE_DEFAULT_BUTTON)) {
-			HWND hComboBox = GetDlgItem(GetParent(hWnd), SELECT_FILE1);
+			HWND hComboBox = GetDlgItem(hWnd, SELECT_FILE1);
+			HWND hDefaultDisplayText = GetDlgItem(hWnd, DEFAULT_DISPLAY_TEXT);
 			int selectedIndex = SendMessageW(hComboBox, CB_GETCURSEL, 0, 0);
 			defaultCrosshairIndex = selectedIndex;
-			//change json file data
-			//update window that displays defaultCrosshair
+			//updat cJSON object and write to file
+			updateJSONData(root);
+			writeJSONData(root);
+
+			//update display text
+			char buffer[200];
+			const char* crosshair = inputCrosshair[defaultCrosshairIndex - DEFAULT_CROSSHAIR_NUM];
+			if (defaultCrosshairIndex < DEFAULT_CROSSHAIR_NUM) {
+				strcpy_s(buffer, sizeof(buffer), "Default Crosshair: cat");
+			}
+			else {
+				sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", crosshair);
+				int length = strlen(buffer);
+				buffer[length - 4] = '\0';
+			}
+			OutputDebugStringA(buffer);
+
+			SetWindowTextA(hDefaultDisplayText, buffer);
+			InvalidateRect(hDefaultDisplayText, NULL, TRUE);
+			UpdateWindow(hDefaultDisplayText);
+
 		}
 		break;
 	}
@@ -385,19 +419,48 @@ void loadCrosshairImage() { //loads crosshair image
 }
 
 void loadJSONData() {
-	FILE* file = fopen(JSON_FILE_PATH, "r");
-	fseek(file, 0, SEEK_END);
-	long fileSize = ftell(file);
-	fseek(file, 0, SEEK_SET);
-	char* jsonData = (char*)malloc(fileSize + 1);
-	fread(jsonData, 1, fileSize, file);
-	fclose(file);
-	root = cJSON_Parse(jsonData);
-	free(jsonData);
+	FILE* file;
+	if (fopen_s(&file, JSON_FILE_PATH, "r") != 0) {
+		MessageBoxA(NULL, "Failed to open JSON file", NULL, MB_OK);
+	}
+
+	if (file != NULL) {
+		fseek(file, 0, SEEK_END);
+		long fileSize = ftell(file);
+		fseek(file, 0, SEEK_SET);
+
+		char* jsonData = (char*)malloc(fileSize + 1);
+		fread(jsonData, 1, fileSize, file);
+		jsonData[fileSize] = '\0';
+
+		fclose(file);
+
+		root = cJSON_Parse(jsonData);
+		free(jsonData);
+	}
+	else {
+		MessageBoxA(NULL, "Invalid file pointer", NULL, MB_OK);
+	}
+
 
 	if (root == NULL) {
-		const char* error = cJSON_GetErrorPtr();
-		OutputDebugStringA(error);
-		MessageBox(NULL, "JSON parsing error!", NULL, MB_OK);
+		MessageBoxA(NULL, "Error parsing JSON file", NULL, MB_OK);
 	}
+}
+
+void updateJSONData() {
+	cJSON* name = cJSON_GetObjectItem(root, "defaultCrosshair");
+	if (name != NULL) {
+		cJSON_ReplaceItemInObject(root, "defaultCrosshair", cJSON_CreateNumber(defaultCrosshairIndex));
+	}
+}
+
+void writeJSONData() {
+	FILE* file;
+	if (fopen_s(&file, JSON_FILE_PATH, "w") != 0) {
+		MessageBoxA(NULL, "Failed to open JSON file", NULL, MB_OK);
+	}
+
+	fputs(cJSON_Print(root), file);
+	fclose(file);
 }
