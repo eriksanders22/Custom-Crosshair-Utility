@@ -7,13 +7,13 @@
 
 /* TODO
 / make crosshair look the same on screen as the image that is input in the crosshairs folder
-/ making preset crosshairs with paint
-/ add on off status for button
-/ organize windows into group boxes
-/ remember user previous choice when they ran the program last time | settings file need to read and write to it PRIO
-/	-create file that holds user settings
-/	-create window that displays current default
 / converting input to correct bmp
+/ upload crosshair button
+/ help button
+/ fix flashing screen (prob need to create smaller window for crosshair so it doesnt overlap with control)
+/ figure out how to release updates
+/ making preset crosshairs with paint
+/ organize windows into group boxes
 / create built in crosshair editor (color, size)
 / readme file for instructions
 / make the main window non resizable and figure out good dimensions
@@ -32,7 +32,6 @@ black is keyed out for transparency
 #define TOGGLE_DEFAULT_BUTTON 3 //Toggle default setting crosshair
 #define DEFAULT_DISPLAY_TEXT 4 //text that displays current default
 #define ID_IMAGE 1001 //ID for the child class that displays the image on top of the transparent window
-#define DEFAULT_CROSSHAIR_NUM 3 //number of default crosshairs
 #define JSON_FILE_PATH "config.json" //config file
 
 LRESULT CALLBACK WindProc(HWND, UINT, WPARAM, LPARAM); //main window proc
@@ -44,7 +43,9 @@ void updateJSONData(); //changes data in the cJSON object that is created
 void writeJSONData(); //writes data from cJSON object into config.json
 
 char** inputCrosshair = NULL; //list of file names in the crosshairs folder
-int fileCount = 0; //list of crosshair files from Crosshairs folder
+int inputFileCount = 0; //list of crosshair files from Crosshairs folder
+char** defaultCrosshair = NULL; //list of default crosshair file names
+int defaultFileCount = 0; //number of default crosshairs
 HBITMAP hBitmap; //background image handle
 HBITMAP g_hCrosshair = NULL; //global crosshair image handle
 char imagePath[MAX_PATH]; //file path to the crosshair image
@@ -64,6 +65,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 		return -1;
 
 	HWND hWnd = CreateWindowW(L"windowClass", L"CCU BETA", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 1000, 100, 500, 600, NULL, NULL, hInstance, NULL); //main control window
+
+	//remove maximize option
+	LONG_PTR windowStyle = GetWindowLongPtr(hWnd, GWL_STYLE);
+	windowStyle &= ~WS_MAXIMIZEBOX;
+	SetWindowLongPtr(hWnd, GWL_STYLE, windowStyle);
 
 	//creates overlay window class
 	WNDCLASSEX Overlaywc = {
@@ -109,9 +115,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 
 	//window creation
 	HWND hTitle = CreateWindowW(L"static", L"Custom Crosshair Utility", WS_VISIBLE | WS_CHILD, 200, 50, 170, 25, hWnd, NULL, hInstance, NULL); //title window
-	HWND hOnOffButton = CreateWindowW(L"Button", L"Toggle Crosshair", WS_VISIBLE | WS_CHILD, 200, 400, 150, 50, hWnd, (HMENU) ON_OFF_BUTTON, hInstance, NULL); //on off button
-	HWND hToggleDefault = CreateWindowW(L"Button", L"Set as Default", WS_VISIBLE | WS_CHILD, 200, 500, 150, 25, hWnd, (HMENU) TOGGLE_DEFAULT_BUTTON, hInstance, NULL); //set current crosshair as default
-	HWND hDefaultText = CreateWindowW(L"static", L"Hello", WS_VISIBLE | WS_CHILD, 200, 600, 200, 25, hWnd, (HMENU) DEFAULT_DISPLAY_TEXT, hInstance, NULL); //displays defaultCrosshairIndex
+	HWND hOnOffButton = CreateWindowW(L"Button", L"Toggle Crosshair", WS_VISIBLE | WS_CHILD, 200, 400, 150, 40, hWnd, (HMENU) ON_OFF_BUTTON, hInstance, NULL); //on off button
+	HWND hToggleDefault = CreateWindowW(L"Button", L"Set Default Crosshair", WS_VISIBLE | WS_CHILD, 200, 450, 150, 25, hWnd, (HMENU) TOGGLE_DEFAULT_BUTTON, hInstance, NULL); //set current crosshair as default
+	HWND hDefaultText = CreateWindowW(L"static", L"", WS_VISIBLE | WS_CHILD, 200, 500, 200, 25, hWnd, (HMENU) DEFAULT_DISPLAY_TEXT, hInstance, NULL); //displays defaultCrosshairIndex
 	HWND hDropdown = CreateWindowW(L"COMBOBOX", NULL, WS_VISIBLE | WS_CHILD | CBS_DROPDOWN | CBS_HASSTRINGS | WS_VSCROLL,
 	200, 100, 150, 120, hWnd, (HMENU)SELECT_FILE1, hInstance, NULL); //dropdown
 
@@ -130,42 +136,46 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 
 	//read file names
 	char mainPath[MAX_PATH];
-	char folderPath[MAX_PATH];
+	char inputFolderPath[MAX_PATH];
+	char defaultFolderPath[MAX_PATH];
 	// Get the current working directory
-	if (_getcwd(folderPath, sizeof(folderPath)) != NULL) {
-		size_t pathLen = strlen(folderPath);
+	if (_getcwd(inputFolderPath, sizeof(inputFolderPath)) != NULL) {
+		size_t pathLen = strlen(inputFolderPath);
 		for (size_t i = 0; i < pathLen; i++) {
-			if (folderPath[i] == '\\') {
-				memmove(folderPath + i + 1, folderPath + i, (pathLen - i) + 1);
-				folderPath[i] = '\\';
+			if (inputFolderPath[i] == '\\') {
+				memmove(inputFolderPath + i + 1, inputFolderPath + i, (pathLen - i) + 1);
+				inputFolderPath[i] = '\\';
 				pathLen++;
 				i++;
 			}
 		}
 	}
 	//create the main path where all the files of the project are 
-	strcpy_s(mainPath, sizeof(mainPath), folderPath);
+	strcpy_s(mainPath, sizeof(mainPath), inputFolderPath);
 	// Construct the relative folder path
-	strcat_s(folderPath, sizeof(folderPath), "\\\\Crosshairs");
+	strcat_s(inputFolderPath, sizeof(inputFolderPath), "\\\\Crosshairs");
 	// Call the function with the relative folder path
-	readInputFiles(folderPath, &inputCrosshair, &fileCount);
+	readInputFiles(inputFolderPath, &inputCrosshair, &inputFileCount);
+	//same for default crosshairs
+	strcpy_s(defaultFolderPath, sizeof(defaultFolderPath), mainPath);
+	strcat_s(defaultFolderPath, sizeof(defaultFolderPath), "\\\\Default Crosshairs");
+	readInputFiles(defaultFolderPath, &defaultCrosshair, &defaultFileCount);
 
 	//sets the default image path
-	if (defaultCrosshairIndex < DEFAULT_CROSSHAIR_NUM) {
+	if (defaultCrosshairIndex < defaultFileCount) {
 		strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\\\");
-		strcat_s(imagePath, sizeof(imagePath), "cat.bmp");
+		strcat_s(imagePath, sizeof(imagePath), defaultCrosshair[defaultCrosshairIndex]);
 	}
 	else {
 		strcpy_s(imagePath, sizeof(imagePath), "Crosshairs\\\\");
-		strcat_s(imagePath, sizeof(imagePath), inputCrosshair[defaultCrosshairIndex-DEFAULT_CROSSHAIR_NUM]);
+		strcat_s(imagePath, sizeof(imagePath), inputCrosshair[defaultCrosshairIndex- defaultFileCount]);
 	}
-	
 
 	//load image for the initial selection
 	loadCrosshairImage();
 
 	//add in additional options to the combobox
-	for (int i = 0; i < fileCount; i++) {
+	for (int i = 0; i < inputFileCount; i++) {
 		char fileName[MAXCHAR];
 		strcpy_s(fileName, sizeof(fileName), inputCrosshair[i]);
 		if (strlen(fileName) >= 4) {
@@ -173,6 +183,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 		}
 		SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)fileName);
 	}
+
+	//set default display text
+	char buffer[200];
+	char* crosshair = NULL;
+	if (defaultCrosshairIndex < defaultFileCount) {
+		crosshair = defaultCrosshair[defaultCrosshairIndex];
+		sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", crosshair);
+		int length = strlen(buffer);
+		buffer[length - 4] = '\0';
+	}
+	else {
+		crosshair = inputCrosshair[defaultCrosshairIndex - defaultFileCount];
+		sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", crosshair);
+		int length = strlen(buffer);
+		buffer[length - 4] = '\0';
+	}
+
+	//Update window
+	SetWindowTextA(hDefaultText, buffer);
+	InvalidateRect(hDefaultText, NULL, TRUE);
+	UpdateWindow(hDefaultText);
 	
 	MSG msg = { 0 };
 
@@ -184,7 +215,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	//clean up
 	DeleteObject(hBitmap);
 
-	for (int i = 0; i < fileCount; i++) {
+	for (int i = 0; i < inputFileCount; i++) {
 		free(inputCrosshair[i]);
 	}
 	free(inputCrosshair);
@@ -203,24 +234,12 @@ LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 			int selectedIndex = SendMessageW(hComboBox, CB_GETCURSEL, 0, 0);
 
 			//determine file path
-			if (selectedIndex < DEFAULT_CROSSHAIR_NUM) {
-				switch (selectedIndex) {
-				case 0:
-					strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
-					strcat_s(imagePath, sizeof(imagePath), "cat.bmp");
-					break;
-				case 1:
-					strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
-					strcat_s(imagePath, sizeof(imagePath), "dog.bmp");
-					break;
-				case 2:
-					strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
-					strcat_s(imagePath, sizeof(imagePath), "frog.bmp");
-					break;
-				}
-			} else if (selectedIndex-DEFAULT_CROSSHAIR_NUM < fileCount) {
+			if (selectedIndex < defaultFileCount) {
+				strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
+				strcat_s(imagePath, sizeof(imagePath), defaultCrosshair[selectedIndex]);
+			} else if (selectedIndex-defaultFileCount < inputFileCount) {
 				strcpy_s(imagePath, sizeof(imagePath), "Crosshairs\\\\");
-				strcat_s(imagePath, sizeof(imagePath), inputCrosshair[selectedIndex-DEFAULT_CROSSHAIR_NUM]);
+				strcat_s(imagePath, sizeof(imagePath), inputCrosshair[selectedIndex- defaultFileCount]);
 			}
 
 			//gets the overlay window handle
@@ -253,17 +272,21 @@ LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 			//update display text
 			char buffer[200];
-			const char* crosshair = inputCrosshair[defaultCrosshairIndex - DEFAULT_CROSSHAIR_NUM];
-			if (defaultCrosshairIndex < DEFAULT_CROSSHAIR_NUM) {
-				strcpy_s(buffer, sizeof(buffer), "Default Crosshair: cat");
-			}
-			else {
+			char* crosshair = NULL;
+			if (defaultCrosshairIndex < defaultFileCount) {
+				crosshair = defaultCrosshair[defaultCrosshairIndex];
 				sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", crosshair);
 				int length = strlen(buffer);
 				buffer[length - 4] = '\0';
 			}
-			OutputDebugStringA(buffer);
+			else {
+				crosshair = inputCrosshair[defaultCrosshairIndex - defaultFileCount];
+				sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", crosshair);
+				int length = strlen(buffer);
+				buffer[length - 4] = '\0';
+			}
 
+			//Update window
 			SetWindowTextA(hDefaultDisplayText, buffer);
 			InvalidateRect(hDefaultDisplayText, NULL, TRUE);
 			UpdateWindow(hDefaultDisplayText);
@@ -460,7 +483,6 @@ void writeJSONData() {
 	if (fopen_s(&file, JSON_FILE_PATH, "w") != 0) {
 		MessageBoxA(NULL, "Failed to open JSON file", NULL, MB_OK);
 	}
-
 	fputs(cJSON_Print(root), file);
 	fclose(file);
 }
