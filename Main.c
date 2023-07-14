@@ -2,16 +2,18 @@
 #include <windows.h>
 #include <direct.h>
 #include <io.h>
+#include <FreeImage.h>
 #include "cJSON.h"
 #include "Main.h"
 
 /* TODO
 / make crosshair look the same on screen as the image that is input in the crosshairs folder
-/ converting input to correct bmp
+/ add hotkeys for on off and size when implemented
 / upload crosshair button
 / help button
 / fix flashing screen (prob need to create smaller window for crosshair so it doesnt overlap with control)
 / figure out how to release updates
+/ simple crosshair changes (size, color) also add these to config
 / making preset crosshairs with paint
 / organize windows into group boxes
 / create built in crosshair editor (color, size)
@@ -41,6 +43,7 @@ void loadCrosshairImage(); //loads the image used to show the crosshair
 void loadJSONData(); //loads the user settings from config.json into a cJSON object
 void updateJSONData(); //changes data in the cJSON object that is created
 void writeJSONData(); //writes data from cJSON object into config.json
+void convertToBMP(char* filePath, char* outputFolder);
 
 char** inputCrosshair = NULL; //list of file names in the crosshairs folder
 int inputFileCount = 0; //list of crosshair files from Crosshairs folder
@@ -138,36 +141,30 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	char mainPath[MAX_PATH];
 	char inputFolderPath[MAX_PATH];
 	char defaultFolderPath[MAX_PATH];
+
 	// Get the current working directory
-	if (_getcwd(inputFolderPath, sizeof(inputFolderPath)) != NULL) {
-		size_t pathLen = strlen(inputFolderPath);
-		for (size_t i = 0; i < pathLen; i++) {
-			if (inputFolderPath[i] == '\\') {
-				memmove(inputFolderPath + i + 1, inputFolderPath + i, (pathLen - i) + 1);
-				inputFolderPath[i] = '\\';
-				pathLen++;
-				i++;
-			}
-		}
+	if (_getcwd(inputFolderPath, sizeof(inputFolderPath)) == NULL) {
+		MessageBoxA(NULL, "Error getting current directory", NULL, MB_OK);
 	}
+	
 	//create the main path where all the files of the project are 
 	strcpy_s(mainPath, sizeof(mainPath), inputFolderPath);
 	// Construct the relative folder path
-	strcat_s(inputFolderPath, sizeof(inputFolderPath), "\\\\Crosshairs");
+	strcat_s(inputFolderPath, sizeof(inputFolderPath), "\\Crosshairs");
 	// Call the function with the relative folder path
 	readInputFiles(inputFolderPath, &inputCrosshair, &inputFileCount);
 	//same for default crosshairs
 	strcpy_s(defaultFolderPath, sizeof(defaultFolderPath), mainPath);
-	strcat_s(defaultFolderPath, sizeof(defaultFolderPath), "\\\\Default Crosshairs");
+	strcat_s(defaultFolderPath, sizeof(defaultFolderPath), "\\Default Crosshairs");
 	readInputFiles(defaultFolderPath, &defaultCrosshair, &defaultFileCount);
 
 	//sets the default image path
 	if (defaultCrosshairIndex < defaultFileCount) {
-		strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\\\");
+		strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
 		strcat_s(imagePath, sizeof(imagePath), defaultCrosshair[defaultCrosshairIndex]);
 	}
 	else {
-		strcpy_s(imagePath, sizeof(imagePath), "Crosshairs\\\\");
+		strcpy_s(imagePath, sizeof(imagePath), "Converted Crosshairs\\");
 		strcat_s(imagePath, sizeof(imagePath), inputCrosshair[defaultCrosshairIndex- defaultFileCount]);
 	}
 
@@ -182,6 +179,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 			fileName[strlen(fileName) - 4] = '\0'; //removes .bmp from the end of the name displayed in the combobox
 		}
 		SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)fileName);
+	}
+
+	//change all input crosshairs to .bmp
+	for (int i = 0; i < inputFileCount; i++) {
+		char currentImage[MAX_PATH];
+		strcpy_s(currentImage, sizeof(currentImage), "Crosshairs\\");
+		strcat_s(currentImage, sizeof(currentImage), inputCrosshair[i]);
+		convertToBMP(currentImage, "Converted Crosshairs");
 	}
 
 	//set default display text
@@ -238,7 +243,7 @@ LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 				strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
 				strcat_s(imagePath, sizeof(imagePath), defaultCrosshair[selectedIndex]);
 			} else if (selectedIndex-defaultFileCount < inputFileCount) {
-				strcpy_s(imagePath, sizeof(imagePath), "Crosshairs\\\\");
+				strcpy_s(imagePath, sizeof(imagePath), "Converted Crosshairs\\");
 				strcat_s(imagePath, sizeof(imagePath), inputCrosshair[selectedIndex- defaultFileCount]);
 			}
 
@@ -409,7 +414,6 @@ void readInputFiles(const char* folderPath, char*** inputCrosshair, int* fileCou
 	FindClose(hFind);
 	hFind = FindFirstFileA(searchPath, &findData);
 	if (hFind == INVALID_HANDLE_VALUE) {
-		printf("Failed to open directory: %s\n", folderPath);
 		free(*inputCrosshair);
 		return;
 	}
@@ -485,4 +489,32 @@ void writeJSONData() {
 	}
 	fputs(cJSON_Print(root), file);
 	fclose(file);
+}
+
+void convertToBMP(char* filePath, char* outputFolder) {
+	char* fileName = strrchr(filePath, '\\');
+	fileName++;
+	char outputFileName[FILENAME_MAX];
+	snprintf(outputFileName, sizeof(outputFileName), "%s\\%s", outputFolder, fileName);
+	OutputDebugStringA(outputFileName);
+
+	FREE_IMAGE_FORMAT inputFormat = FreeImage_GetFileType(filePath, 0);
+	if (inputFormat == FIF_UNKNOWN) {
+		MessageBoxA(NULL, "Failed to get image file type", NULL, MB_OK);
+	}
+
+	FIBITMAP* inputImage = FreeImage_Load(inputFormat, filePath, 0);
+	if (!inputImage) {
+		MessageBoxA(NULL, "Failed to load image", NULL, MB_OK);
+	}
+
+	FIBITMAP* bitmap24 = FreeImage_ConvertTo24Bits(inputImage);
+
+	FREE_IMAGE_FORMAT outputFormat = FIF_BMP;
+
+	FreeImage_Save(outputFormat, bitmap24, outputFileName, 0);
+
+	FreeImage_Unload(inputImage);
+	FreeImage_Unload(bitmap24);
+
 }

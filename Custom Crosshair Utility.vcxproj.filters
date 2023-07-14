@@ -29,6 +29,9 @@
     <ClInclude Include="..\..\..\Downloads\cJSON-1.7.16\cJSON-1.7.16\cJSON.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\Downloads\FreeImage3180\FreeImage\Source\FreeImage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="config.json">
