@@ -3,10 +3,11 @@
 #include <direct.h>
 #include <io.h>
 #include <FreeImage.h>
-#include "cJSON.h"
+#include <cJSON.h>
 #include "Main.h"
 
 /* TODO
+/ NEED TO GET THE cJSON lib files for the VM
 / make crosshair look the same on screen as the image that is input in the crosshairs folder
 / add hotkeys for on off and size when implemented
 / upload crosshair button
@@ -26,6 +27,11 @@ INFO:
 Images must be BMP (correct format through ms.paint) 
 black is keyed out for transparency
 
+How to Update Setup
+    - Go to Inno Setup folder in D drive
+	- replace Release file with the new Release file generated from project
+	- compile with inno setup compiler
+	- new setup is in the CCU setup folder in the D drive
 
 */
 
@@ -34,7 +40,6 @@ black is keyed out for transparency
 #define TOGGLE_DEFAULT_BUTTON 3 //Toggle default setting crosshair
 #define DEFAULT_DISPLAY_TEXT 4 //text that displays current default
 #define ID_IMAGE 1001 //ID for the child class that displays the image on top of the transparent window
-#define JSON_FILE_PATH "config.json" //config file
 
 LRESULT CALLBACK WindProc(HWND, UINT, WPARAM, LPARAM); //main window proc
 LRESULT CALLBACK OverlayWindowProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp); //transparent overlay window proc
@@ -43,6 +48,7 @@ void loadCrosshairImage(); //loads the image used to show the crosshair
 void loadJSONData(); //loads the user settings from config.json into a cJSON object
 void updateJSONData(); //changes data in the cJSON object that is created
 void writeJSONData(); //writes data from cJSON object into config.json
+void getExecutableFolderPath(char* buffer, size_t size);
 void convertToBMP(char* filePath, char* outputFolder);
 
 char** inputCrosshair = NULL; //list of file names in the crosshairs folder
@@ -52,6 +58,7 @@ int defaultFileCount = 0; //number of default crosshairs
 HBITMAP hBitmap; //background image handle
 HBITMAP g_hCrosshair = NULL; //global crosshair image handle
 char imagePath[MAX_PATH]; //file path to the crosshair image
+char configFilePath[MAX_PATH]; //file path to config.json
 BOOLEAN isButtonOn = FALSE; //button for turning crosshair on and off
 int defaultCrosshairIndex = 0; //default crosshair index that is used to load original crosshair | take user input in the future to change
 cJSON* root = NULL; //root node of the json data
@@ -107,6 +114,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	ShowWindow(hOverlayWindow, cmdShow);
 	UpdateWindow(hOverlayWindow);
 
+	//set config file path
+	getExecutableFolderPath(configFilePath, sizeof(configFilePath));
+	strcat_s(configFilePath, sizeof(configFilePath), "config.json");
+	OutputDebugStringA(configFilePath);
+
 	//load JSON data
 	loadJSONData();
 
@@ -115,6 +127,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	if (cJSON_IsNumber(crosshairNode)) {
 		defaultCrosshairIndex = crosshairNode->valueint;
 	}
+	char debug[50];
+	sprintf_s(debug, sizeof(debug), "%d", defaultCrosshairIndex);
+	OutputDebugStringA(debug);
 
 	//window creation
 	HWND hTitle = CreateWindowW(L"static", L"Custom Crosshair Utility", WS_VISIBLE | WS_CHILD, 200, 50, 170, 25, hWnd, NULL, hInstance, NULL); //title window
@@ -128,7 +143,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)"Cat");
 	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)"Dog");
 	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)"Frog");
-	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_SETCURSEL, (WPARAM)defaultCrosshairIndex, 0);
 
 	//background image for control window
 	hBitmap = (HBITMAP)LoadImage(NULL, L"Images\\dognose.bmp", IMAGE_BITMAP, 500, 500, LR_LOADFROMFILE);
@@ -168,6 +182,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 		strcat_s(imagePath, sizeof(imagePath), inputCrosshair[defaultCrosshairIndex- defaultFileCount]);
 	}
 
+	//change all input crosshairs to .bmp
+	for (int i = 0; i < inputFileCount; i++) {
+		char currentImage[MAX_PATH];
+		strcpy_s(currentImage, sizeof(currentImage), "Crosshairs\\");
+		strcat_s(currentImage, sizeof(currentImage), inputCrosshair[i]);
+		convertToBMP(currentImage, "Converted Crosshairs");
+	}
+
 	//load image for the initial selection
 	loadCrosshairImage();
 
@@ -180,14 +202,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 		}
 		SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)fileName);
 	}
-
-	//change all input crosshairs to .bmp
-	for (int i = 0; i < inputFileCount; i++) {
-		char currentImage[MAX_PATH];
-		strcpy_s(currentImage, sizeof(currentImage), "Crosshairs\\");
-		strcat_s(currentImage, sizeof(currentImage), inputCrosshair[i]);
-		convertToBMP(currentImage, "Converted Crosshairs");
-	}
+	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_SETCURSEL, (WPARAM)defaultCrosshairIndex, 0); //set initial combobox selection
 
 	//set default display text
 	char buffer[200];
@@ -447,8 +462,13 @@ void loadCrosshairImage() { //loads crosshair image
 
 void loadJSONData() {
 	FILE* file;
-	if (fopen_s(&file, JSON_FILE_PATH, "r") != 0) {
-		MessageBoxA(NULL, "Failed to open JSON file", NULL, MB_OK);
+	MessageBoxA(NULL, configFilePath, NULL, MB_OK);
+	if (fopen_s(&file, configFilePath, "r") != 0) {
+		char errorMessage[256];
+		strerror_s(errorMessage, sizeof(errorMessage), errno);
+		char message[512];
+		snprintf(message, sizeof(message), "Error opening JSON file:\n%s", errorMessage);
+		MessageBoxA(NULL, message, "File Error", MB_OK);
 	}
 
 	if (file != NULL) {
@@ -457,13 +477,24 @@ void loadJSONData() {
 		fseek(file, 0, SEEK_SET);
 
 		char* jsonData = (char*)malloc(fileSize + 1);
-		fread(jsonData, 1, fileSize, file);
-		jsonData[fileSize] = '\0';
+		if (jsonData != NULL) {
+			fread(jsonData, 1, fileSize, file);
+			jsonData[fileSize] = '\0';
 
-		fclose(file);
+			fclose(file);
 
-		root = cJSON_Parse(jsonData);
-		free(jsonData);
+			root = cJSON_Parse(jsonData);
+			free(jsonData);
+
+			if (root == NULL) {
+				MessageBoxA(NULL, "Error parsing JSON data", NULL, MB_OK);
+			}
+
+		}
+		else {
+			MessageBoxA(NULL, "Error allocating memory for JSON data", NULL, MB_OK);
+			fclose(file);
+		}
 	}
 	else {
 		MessageBoxA(NULL, "Invalid file pointer", NULL, MB_OK);
@@ -484,8 +515,12 @@ void updateJSONData() {
 
 void writeJSONData() {
 	FILE* file;
-	if (fopen_s(&file, JSON_FILE_PATH, "w") != 0) {
-		MessageBoxA(NULL, "Failed to open JSON file", NULL, MB_OK);
+	if (fopen_s(&file, configFilePath, "w") != 0) {
+		char errorMessage[256];
+		strerror_s(errorMessage, sizeof(errorMessage), errno);
+		char message[512];
+		snprintf(message, sizeof(message), "Error opening JSON file:\n%s", errorMessage);
+		MessageBoxA(NULL, message, "File Error", MB_OK);
 	}
 	fputs(cJSON_Print(root), file);
 	fclose(file);
@@ -517,4 +552,19 @@ void convertToBMP(char* filePath, char* outputFolder) {
 	FreeImage_Unload(inputImage);
 	FreeImage_Unload(bitmap24);
 
+}
+
+void getExecutableFolderPath(char* buffer, size_t size) {
+	DWORD pathLength = GetModuleFileNameA(NULL, buffer, size);
+	if (pathLength > 0 && pathLength < size) {
+		//add backslash if it doesnt have one
+		char* lastBackslash = strrchr(buffer, '\\');
+		if (lastBackslash != NULL) {
+			*(lastBackslash + 1) = '\0';
+		}
+
+	}
+	else {
+		buffer[0] = '\0';
+	}
 }

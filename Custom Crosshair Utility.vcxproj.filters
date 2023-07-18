@@ -18,18 +18,15 @@
     <ClCompile Include="Main.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\Downloads\cJSON-1.7.16\cJSON-1.7.16\cJSON.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Main.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\Downloads\cJSON-1.7.16\cJSON-1.7.16\cJSON.h">
+    <ClInclude Include="..\..\..\Downloads\FreeImage3180\FreeImage\Source\FreeImage.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\Downloads\FreeImage3180\FreeImage\Source\FreeImage.h">
+    <ClInclude Include="cJSON.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
