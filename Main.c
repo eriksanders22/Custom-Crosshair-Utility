@@ -4,22 +4,23 @@
 #include <io.h>
 #include <FreeImage.h>
 #include <cJSON.h>
+#include <ShlObj.h>
 #include "Main.h"
 
 /* TODO
-/ NEED TO GET THE cJSON lib files for the VM
-/ make crosshair look the same on screen as the image that is input in the crosshairs folder
-/ add hotkeys for on off and size when implemented
-/ upload crosshair button
-/ help button
-/ fix flashing screen (prob need to create smaller window for crosshair so it doesnt overlap with control)
-/ figure out how to release updates
-/ simple crosshair changes (size, color) also add these to config
-/ making preset crosshairs with paint
-/ organize windows into group boxes
-/ create built in crosshair editor (color, size)
-/ readme file for instructions
-/ make the main window non resizable and figure out good dimensions
+* add config file option for the last status of the crosshair
+* make crosshair look the same on screen as the image that is input in the crosshairs folder
+* add hotkeys for on off and size when implemented
+* upload crosshair button
+* help button
+* fix flashing screen (prob need to create smaller window for crosshair so it doesnt overlap with control)
+* figure out how to release updates
+* simple crosshair changes (size, color) also add these to config
+* making preset crosshairs with paint
+* organize windows into group boxes
+* create built in crosshair editor (color, size)
+* readme file for instructions
+* make the main window non resizable and figure out good dimensions
 */
 
 /*
@@ -43,6 +44,8 @@ How to Update Setup
 
 LRESULT CALLBACK WindProc(HWND, UINT, WPARAM, LPARAM); //main window proc
 LRESULT CALLBACK OverlayWindowProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp); //transparent overlay window proc
+HRESULT getAppDataFolderPath(LPSTR buffer, size_t size); //get the location of the %appdata% folder
+void createAppData();
 void readInputFiles(const char* folderPath, char*** inputCrosshair, int* fileCount); //reads every file in the crosshairs folder and puts it into the InputCrosshair array
 void loadCrosshairImage(); //loads the image used to show the crosshair
 void loadJSONData(); //loads the user settings from config.json into a cJSON object
@@ -59,6 +62,7 @@ HBITMAP hBitmap; //background image handle
 HBITMAP g_hCrosshair = NULL; //global crosshair image handle
 char imagePath[MAX_PATH]; //file path to the crosshair image
 char configFilePath[MAX_PATH]; //file path to config.json
+LPSTR appDataPath[MAX_PATH]; //path to %appdata%
 BOOLEAN isButtonOn = FALSE; //button for turning crosshair on and off
 int defaultCrosshairIndex = 0; //default crosshair index that is used to load original crosshair | take user input in the future to change
 cJSON* root = NULL; //root node of the json data
@@ -114,10 +118,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	ShowWindow(hOverlayWindow, cmdShow);
 	UpdateWindow(hOverlayWindow);
 
-	//set config file path
-	getExecutableFolderPath(configFilePath, sizeof(configFilePath));
-	strcat_s(configFilePath, sizeof(configFilePath), "config.json");
-	OutputDebugStringA(configFilePath);
+	//create all files within %appdata%
+	createAppData();
 
 	//load JSON data
 	loadJSONData();
@@ -462,7 +464,6 @@ void loadCrosshairImage() { //loads crosshair image
 
 void loadJSONData() {
 	FILE* file;
-	MessageBoxA(NULL, configFilePath, NULL, MB_OK);
 	if (fopen_s(&file, configFilePath, "r") != 0) {
 		char errorMessage[256];
 		strerror_s(errorMessage, sizeof(errorMessage), errno);
@@ -566,5 +567,57 @@ void getExecutableFolderPath(char* buffer, size_t size) {
 	}
 	else {
 		buffer[0] = '\0';
+	}
+}
+
+HRESULT getAppDataFolderPath(LPSTR buffer, size_t size) {
+	return SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, buffer);
+}
+
+void createAppData() {
+	if (SUCCEEDED(getAppDataFolderPath(appDataPath, sizeof(appDataPath)))) {
+		char appDataSubfolder[MAX_PATH];
+		snprintf(appDataSubfolder, MAX_PATH, "%s\\CCU\0", appDataPath);
+
+		//create CCU folder within appdata
+		if (!CreateDirectoryA(appDataSubfolder, NULL)) {
+			DWORD error = GetLastError();
+			if (error != ERROR_ALREADY_EXISTS) {
+				char buffer[20];
+				sprintf_s(buffer, sizeof(buffer), "%u", error);
+				MessageBoxA(NULL, buffer, "Error", MB_OK);
+			}
+		}
+
+		//set config file path
+		getAppDataFolderPath(configFilePath, sizeof(configFilePath));
+		strcat_s(configFilePath, sizeof(configFilePath), "\\CCU\\config.json");
+
+		//create config.json file
+		
+		//check if file already exists
+		FILE* file;
+		if (fopen_s(&file, configFilePath, "r") == 0) {
+			fclose(file);
+			return;
+		}
+
+		cJSON* rootConfig = cJSON_CreateObject();
+		cJSON_AddNumberToObject(rootConfig, "defaultCrosshair", 0);
+
+		char* jsonString = cJSON_Print(rootConfig);
+
+		if (fopen_s(&file, configFilePath, "wt") != 0) {
+			MessageBoxA(NULL, "Error creating config", NULL, MB_OK);
+		}
+
+		fputs(jsonString, file);
+
+		fclose(file);
+
+		cJSON_Delete(rootConfig);
+	} 
+	else {
+		MessageBoxA(NULL, "Error getting %appdata% folder", NULL, MB_OK);
 	}
 }
