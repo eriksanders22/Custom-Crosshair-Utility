@@ -9,12 +9,14 @@
 #include "Main.h"
 
 /* TODO
+* change the location of the input files to %appdata% and update all functions that use the input file location
 * add config file option for the last status (on/off) of the crosshair
 * make crosshair look the same on screen as the image that is input in the crosshairs folder
 * add hotkeys for on off and size when implemented
 * upload crosshair button
 * help button
 * fix flashing screen (prob need to create smaller window for crosshair so it doesnt overlap with control)
+* figure out address sanitizer release mode errors -fsanitize=address
 * figure out how to release updates
 * simple crosshair changes (size, color) also add these to config
 * making preset crosshairs with paint
@@ -28,6 +30,7 @@
 INFO: 
 black is keyed out for transparency
 PNG transparency should work correctly
+make sure to release code with config set to a value that exists by default
 
 How to Update Setup
     - Go to Inno Setup folder in D drive
@@ -45,14 +48,14 @@ How to Update Setup
 LRESULT CALLBACK WindProc(HWND, UINT, WPARAM, LPARAM); //main window proc
 LRESULT CALLBACK OverlayWindowProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp); //transparent overlay window proc
 HRESULT getAppDataFolderPath(LPSTR buffer, size_t size); //get the location of the %appdata% folder
-void createAppData();
+void createAppData(); //creates CCU folder and config file within %appdata%
 void readInputFiles(const char* folderPath, char*** inputCrosshair, int* fileCount); //reads every file in the crosshairs folder and puts it into the InputCrosshair array
 void loadCrosshairImage(); //loads the image used to show the crosshair
 void loadJSONData(); //loads the user settings from config.json into a cJSON object
 void updateJSONData(); //changes data in the cJSON object that is created
 void writeJSONData(); //writes data from cJSON object into config.json
-void getExecutableFolderPath(char* buffer, size_t size);
-void convertToBMP(char* inputFilePath, char* outputFilePath);
+void getExecutableFolderPath(char* buffer, size_t size); //gets the folder path of CustomCrosshair.exe
+void convertToBMP(char* inputFilePath, char* outputFilePath); //converts images to bmp format
 
 char** inputCrosshair = NULL; //list of file names in the crosshairs folder
 int inputFileCount = 0; //list of crosshair files from Crosshairs folder
@@ -63,8 +66,8 @@ HBITMAP g_hCrosshair = NULL; //global crosshair image handle
 char imagePath[MAX_PATH]; //file path to the crosshair image
 char configFilePath[MAX_PATH]; //file path to config.json
 LPSTR appDataPath[MAX_PATH]; //path to %appdata%
-char defaultFolderPath[MAX_PATH];
-char convertedFolderPath[MAX_PATH];
+char defaultFolderPath[MAX_PATH]; //folder path of the default crosshairs folder
+char convertedFolderPath[MAX_PATH]; //folder path of the Converted Crosshairs folder
 BOOLEAN isButtonOn = FALSE; //button for turning crosshair on and off
 int defaultCrosshairIndex = 0; //default crosshair index that is used to load original crosshair | take user input in the future to change
 cJSON* root = NULL; //root node of the json data
@@ -129,7 +132,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	//set default crosshair index
 	cJSON* crosshairNode = cJSON_GetObjectItem(root, "defaultCrosshair");
 	if (cJSON_IsNumber(crosshairNode)) {
-		defaultCrosshairIndex = crosshairNode->valueint;
+		if (crosshairNode->valueint >= 0) {
+			defaultCrosshairIndex = crosshairNode->valueint;
+		}
+		else {
+			MessageBoxA(NULL, "Invalid index number", NULL, MB_OK);
+		}
+
 	}
 	char debug[50];
 	sprintf_s(debug, sizeof(debug), "%d", defaultCrosshairIndex);
@@ -160,12 +169,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	char inputFolderPath[MAX_PATH];
 
 	// Get the exe folder path
-	getExecutableFolderPath(inputFolderPath, sizeof(inputFolderPath));
+	getAppDataFolderPath(inputFolderPath, sizeof(inputFolderPath));
 	
 	//create the main path where all the files of the project are 
-	strcpy_s(mainPath, sizeof(mainPath), inputFolderPath);
+	getExecutableFolderPath(mainPath, sizeof(mainPath));
 	// Construct the absolute folder path
-	strcat_s(inputFolderPath, sizeof(inputFolderPath), "Crosshairs");
+	strcat_s(inputFolderPath, sizeof(inputFolderPath), "\\CCU\\Crosshairs");
 	// Call the function with the absolute folder path
 	readInputFiles(inputFolderPath, &inputCrosshair, &inputFileCount);
 	//same for default crosshairs
@@ -175,7 +184,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	//converted folder path
 	strcpy_s(convertedFolderPath, sizeof(convertedFolderPath), mainPath);
 	strcat_s(convertedFolderPath, sizeof(convertedFolderPath), "Converted Crosshairs");
-	OutputDebugStringA(convertedFolderPath);
 
 	//change all input crosshairs to .bmp
 	for (int i = 0; i < inputFileCount; i++) {
@@ -186,10 +194,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 		char* dotPosition = strrchr(fileName, '.');
 		*dotPosition = '\0';
 
-		snprintf(currentOutput, MAX_PATH, "%s\\%s.bmp", convertedFolderPath, fileName);
-		snprintf(currentImage, MAX_PATH, "%s\\%s", inputFolderPath, inputCrosshair[i]);
-		//strcpy_s(currentImage, sizeof(currentImage), inputFolderPath);
-		//strcat_s(currentImage, sizeof(currentImage), inputCrosshair[i]);
+		//snprintf(currentOutput, MAX_PATH, "%s\\%s.bmp", convertedFolderPath, fileName);
+		//snprintf(currentImage, MAX_PATH, "%s\\%s", inputFolderPath, inputCrosshair[i]);
+		snprintf(currentOutput, MAX_PATH, "%s\\CCU\\Converted Crosshairs\\%s.bmp", appDataPath, fileName);
+		snprintf(currentImage, MAX_PATH, "%s\\CCU\\Crosshairs\\%s", appDataPath, inputCrosshair[i]);
 		convertToBMP(currentImage, currentOutput);
 	}
 
@@ -198,20 +206,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	if (defaultCrosshairIndex < defaultFileCount) {
 		//default crosshairs
 		snprintf(imagePath, sizeof(imagePath), "%s\\%s", defaultFolderPath, defaultCrosshair[defaultCrosshairIndex]);
-		//strcat_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
-		//strcat_s(imagePath, sizeof(imagePath), defaultCrosshair[defaultCrosshairIndex]);
 	}
 	else {
 		//converted crosshairs that are in bmp format
 		char fileName[MAXCHAR];
-		OutputDebugStringA(inputCrosshair[defaultCrosshairIndex - defaultFileCount]);
 		strcpy_s(fileName, sizeof(fileName), inputCrosshair[defaultCrosshairIndex - defaultFileCount]);
 		char* dotPosition = strrchr(fileName, '.');
 		*dotPosition = '\0';
-
-		snprintf(imagePath, sizeof(imagePath), "%s\\%s.bmp", convertedFolderPath, fileName);
-		//strcpy_s(imagePath, sizeof(imagePath), "Converted Crosshairs\\");
-		//strcat_s(imagePath, sizeof(imagePath), inputCrosshair[defaultCrosshairIndex- defaultFileCount]);
+		OutputDebugStringA(appDataPath);
+		snprintf(imagePath, sizeof(imagePath), "%s\\CCU\\Converted Crosshairs\\%s.bmp", appDataPath, fileName);
 	}
 
 	//load image for the initial selection
@@ -224,12 +227,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 		if (strlen(fileName) >= 4) {
 			fileName[strlen(fileName) - 4] = '\0'; //removes .bmp from the end of the name displayed in the combobox
 		}
+
 		SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)fileName);
 	}
 	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_SETCURSEL, (WPARAM)defaultCrosshairIndex, 0); //set initial combobox selection
 
+
+
 	//set default display text
-	char buffer[200];
+	char buffer[200] = { 0 };
 	if (defaultCrosshairIndex < defaultFileCount) {
 		sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", defaultCrosshair[defaultCrosshairIndex]);
 		int length = strlen(buffer);
@@ -277,16 +283,13 @@ LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 			//determine file path
 			if (selectedIndex < defaultFileCount) {
 				snprintf(imagePath, sizeof(imagePath), "%s\\%s", defaultFolderPath, defaultCrosshair[selectedIndex]);
-				OutputDebugStringA(imagePath);
 			} else if (selectedIndex-defaultFileCount < inputFileCount) {
 				char fileName[MAXCHAR];
-				OutputDebugStringA(inputCrosshair[selectedIndex - defaultFileCount]);
 				strcpy_s(fileName, sizeof(fileName), inputCrosshair[selectedIndex - defaultFileCount]);
 				char* dotPosition = strrchr(fileName, '.');
 				*dotPosition = '\0';
 
-				snprintf(imagePath, sizeof(imagePath), "%s\\%s.bmp", convertedFolderPath, fileName);
-				OutputDebugStringA(imagePath);
+				snprintf(imagePath, sizeof(imagePath), "%s\\CCU\\Converted Crosshairs\\%s.bmp", appDataPath, fileName);
 			}
 
 			//gets the overlay window handle
@@ -620,11 +623,15 @@ HRESULT getAppDataFolderPath(LPSTR buffer, size_t size) {
 
 void createAppData() {
 	if (SUCCEEDED(getAppDataFolderPath(appDataPath, sizeof(appDataPath)))) {
-		char appDataSubfolder[MAX_PATH];
-		snprintf(appDataSubfolder, MAX_PATH, "%s\\CCU", appDataPath);
+		char appDataCCUFolder[MAX_PATH];
+		snprintf(appDataCCUFolder, MAX_PATH, "%s\\CCU", appDataPath);
+		char appDataCCU_Crosshairs[MAX_PATH];
+		snprintf(appDataCCU_Crosshairs, MAX_PATH, "%s\\CCU\\Crosshairs", appDataPath);
+		char appDataCCU_ConvertedCrosshairs[MAX_PATH];
+		snprintf(appDataCCU_ConvertedCrosshairs, MAX_PATH, "%s\\CCU\\Converted Crosshairs", appDataPath);
 
 		//create CCU folder within appdata
-		if (!CreateDirectoryA(appDataSubfolder, NULL)) {
+		if (!CreateDirectoryA(appDataCCUFolder, NULL)) {
 			DWORD error = GetLastError();
 			if (error != ERROR_ALREADY_EXISTS) {
 				char buffer[20];
@@ -633,12 +640,57 @@ void createAppData() {
 			}
 		}
 
+		//create Crosshairs Folder for user input
+		if (!CreateDirectoryA(appDataCCU_Crosshairs, NULL)) {
+			DWORD error = GetLastError();
+			if (error != ERROR_ALREADY_EXISTS) {
+				char buffer[20];
+				sprintf_s(buffer, sizeof(buffer), "%u", error);
+				MessageBoxA(NULL, buffer, "Error", MB_OK);
+			}
+		}
+
+		//create Converted Crosshairs Folder for user input
+		if (!CreateDirectoryA(appDataCCU_ConvertedCrosshairs, NULL)) {
+			DWORD error = GetLastError();
+			if (error != ERROR_ALREADY_EXISTS) {
+				char buffer[20];
+				sprintf_s(buffer, sizeof(buffer), "%u", error);
+				MessageBoxA(NULL, buffer, "Error", MB_OK);
+			}
+		}
+
+		//copy a default image into the crosshairs folder
+		FreeImage_Initialise(TRUE);
+
+		char sourceFilePath[MAX_PATH];
+		getExecutableFolderPath(sourceFilePath, sizeof(sourceFilePath));
+		strcat_s(sourceFilePath, sizeof(sourceFilePath), "Images\\test.bmp");
+		char destinationFilePath[MAX_PATH];
+		snprintf(destinationFilePath, sizeof(destinationFilePath), "%s\\test.bmp", appDataCCU_Crosshairs);
+
+		FIBITMAP* image = FreeImage_Load(FIF_BMP, sourceFilePath, BMP_DEFAULT);
+		if (!image) {
+			MessageBoxA(NULL, "Failed to load default image", NULL, MB_OK);
+			FreeImage_DeInitialise();
+			return;
+		}
+
+		OutputDebugStringA(sourceFilePath);
+		OutputDebugStringA(destinationFilePath);
+		BOOL result = FreeImage_Save(FIF_BMP, image, destinationFilePath, BMP_DEFAULT);
+		if (!result) {
+			MessageBoxA(NULL, "Failed to save default image", NULL, MB_OK);
+		}
+
+		FreeImage_Unload(image);
+		FreeImage_DeInitialise();
+
 		//set config file path
 		getAppDataFolderPath(configFilePath, sizeof(configFilePath));
 		strcat_s(configFilePath, sizeof(configFilePath), "\\CCU\\config.json");
 
 		//create config.json file
-		
 		//check if file already exists
 		FILE* file;
 		if (fopen_s(&file, configFilePath, "r") == 0) {
