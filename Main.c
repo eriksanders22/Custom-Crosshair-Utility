@@ -5,10 +5,11 @@
 #include <FreeImage.h>
 #include <cJSON.h>
 #include <ShlObj.h>
+#include <WinUser.h>
 #include "Main.h"
 
 /* TODO
-* add config file option for the last status of the crosshair
+* add config file option for the last status (on/off) of the crosshair
 * make crosshair look the same on screen as the image that is input in the crosshairs folder
 * add hotkeys for on off and size when implemented
 * upload crosshair button
@@ -24,16 +25,15 @@
 */
 
 /*
-INFO:
-Images must be BMP (correct format through ms.paint) 
+INFO: 
 black is keyed out for transparency
+PNG transparency should work correctly
 
 How to Update Setup
     - Go to Inno Setup folder in D drive
 	- replace Release file with the new Release file generated from project
 	- compile with inno setup compiler
 	- new setup is in the CCU setup folder in the D drive
-
 */
 
 #define SELECT_FILE1 1 //combox box ID
@@ -52,7 +52,7 @@ void loadJSONData(); //loads the user settings from config.json into a cJSON obj
 void updateJSONData(); //changes data in the cJSON object that is created
 void writeJSONData(); //writes data from cJSON object into config.json
 void getExecutableFolderPath(char* buffer, size_t size);
-void convertToBMP(char* filePath, char* outputFolder);
+void convertToBMP(char* inputFilePath, char* outputFilePath);
 
 char** inputCrosshair = NULL; //list of file names in the crosshairs folder
 int inputFileCount = 0; //list of crosshair files from Crosshairs folder
@@ -63,6 +63,8 @@ HBITMAP g_hCrosshair = NULL; //global crosshair image handle
 char imagePath[MAX_PATH]; //file path to the crosshair image
 char configFilePath[MAX_PATH]; //file path to config.json
 LPSTR appDataPath[MAX_PATH]; //path to %appdata%
+char defaultFolderPath[MAX_PATH];
+char convertedFolderPath[MAX_PATH];
 BOOLEAN isButtonOn = FALSE; //button for turning crosshair on and off
 int defaultCrosshairIndex = 0; //default crosshair index that is used to load original crosshair | take user input in the future to change
 cJSON* root = NULL; //root node of the json data
@@ -156,40 +158,60 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	//read file names
 	char mainPath[MAX_PATH];
 	char inputFolderPath[MAX_PATH];
-	char defaultFolderPath[MAX_PATH];
 
-	// Get the current working directory
-	if (_getcwd(inputFolderPath, sizeof(inputFolderPath)) == NULL) {
-		MessageBoxA(NULL, "Error getting current directory", NULL, MB_OK);
-	}
+	// Get the exe folder path
+	getExecutableFolderPath(inputFolderPath, sizeof(inputFolderPath));
 	
 	//create the main path where all the files of the project are 
 	strcpy_s(mainPath, sizeof(mainPath), inputFolderPath);
-	// Construct the relative folder path
-	strcat_s(inputFolderPath, sizeof(inputFolderPath), "\\Crosshairs");
-	// Call the function with the relative folder path
+	// Construct the absolute folder path
+	strcat_s(inputFolderPath, sizeof(inputFolderPath), "Crosshairs");
+	// Call the function with the absolute folder path
 	readInputFiles(inputFolderPath, &inputCrosshair, &inputFileCount);
 	//same for default crosshairs
 	strcpy_s(defaultFolderPath, sizeof(defaultFolderPath), mainPath);
-	strcat_s(defaultFolderPath, sizeof(defaultFolderPath), "\\Default Crosshairs");
+	strcat_s(defaultFolderPath, sizeof(defaultFolderPath), "Default Crosshairs");
 	readInputFiles(defaultFolderPath, &defaultCrosshair, &defaultFileCount);
-
-	//sets the default image path
-	if (defaultCrosshairIndex < defaultFileCount) {
-		strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
-		strcat_s(imagePath, sizeof(imagePath), defaultCrosshair[defaultCrosshairIndex]);
-	}
-	else {
-		strcpy_s(imagePath, sizeof(imagePath), "Converted Crosshairs\\");
-		strcat_s(imagePath, sizeof(imagePath), inputCrosshair[defaultCrosshairIndex- defaultFileCount]);
-	}
+	//converted folder path
+	strcpy_s(convertedFolderPath, sizeof(convertedFolderPath), mainPath);
+	strcat_s(convertedFolderPath, sizeof(convertedFolderPath), "Converted Crosshairs");
+	OutputDebugStringA(convertedFolderPath);
 
 	//change all input crosshairs to .bmp
 	for (int i = 0; i < inputFileCount; i++) {
 		char currentImage[MAX_PATH];
-		strcpy_s(currentImage, sizeof(currentImage), "Crosshairs\\");
-		strcat_s(currentImage, sizeof(currentImage), inputCrosshair[i]);
-		convertToBMP(currentImage, "Converted Crosshairs");
+		char currentOutput[MAX_PATH];
+		char fileName[100];
+		strcpy_s(fileName, sizeof(fileName), inputCrosshair[i]);
+		char* dotPosition = strrchr(fileName, '.');
+		*dotPosition = '\0';
+
+		snprintf(currentOutput, MAX_PATH, "%s\\%s.bmp", convertedFolderPath, fileName);
+		snprintf(currentImage, MAX_PATH, "%s\\%s", inputFolderPath, inputCrosshair[i]);
+		//strcpy_s(currentImage, sizeof(currentImage), inputFolderPath);
+		//strcat_s(currentImage, sizeof(currentImage), inputCrosshair[i]);
+		convertToBMP(currentImage, currentOutput);
+	}
+
+
+	//sets the default image path
+	if (defaultCrosshairIndex < defaultFileCount) {
+		//default crosshairs
+		snprintf(imagePath, sizeof(imagePath), "%s\\%s", defaultFolderPath, defaultCrosshair[defaultCrosshairIndex]);
+		//strcat_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
+		//strcat_s(imagePath, sizeof(imagePath), defaultCrosshair[defaultCrosshairIndex]);
+	}
+	else {
+		//converted crosshairs that are in bmp format
+		char fileName[MAXCHAR];
+		OutputDebugStringA(inputCrosshair[defaultCrosshairIndex - defaultFileCount]);
+		strcpy_s(fileName, sizeof(fileName), inputCrosshair[defaultCrosshairIndex - defaultFileCount]);
+		char* dotPosition = strrchr(fileName, '.');
+		*dotPosition = '\0';
+
+		snprintf(imagePath, sizeof(imagePath), "%s\\%s.bmp", convertedFolderPath, fileName);
+		//strcpy_s(imagePath, sizeof(imagePath), "Converted Crosshairs\\");
+		//strcat_s(imagePath, sizeof(imagePath), inputCrosshair[defaultCrosshairIndex- defaultFileCount]);
 	}
 
 	//load image for the initial selection
@@ -208,16 +230,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 
 	//set default display text
 	char buffer[200];
-	char* crosshair = NULL;
 	if (defaultCrosshairIndex < defaultFileCount) {
-		crosshair = defaultCrosshair[defaultCrosshairIndex];
-		sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", crosshair);
+		sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", defaultCrosshair[defaultCrosshairIndex]);
 		int length = strlen(buffer);
 		buffer[length - 4] = '\0';
 	}
 	else {
-		crosshair = inputCrosshair[defaultCrosshairIndex - defaultFileCount];
-		sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", crosshair);
+		sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", inputCrosshair[defaultCrosshairIndex - defaultFileCount]);
 		int length = strlen(buffer);
 		buffer[length - 4] = '\0';
 	}
@@ -257,11 +276,17 @@ LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 			//determine file path
 			if (selectedIndex < defaultFileCount) {
-				strcpy_s(imagePath, sizeof(imagePath), "Default Crosshairs\\");
-				strcat_s(imagePath, sizeof(imagePath), defaultCrosshair[selectedIndex]);
+				snprintf(imagePath, sizeof(imagePath), "%s\\%s", defaultFolderPath, defaultCrosshair[selectedIndex]);
+				OutputDebugStringA(imagePath);
 			} else if (selectedIndex-defaultFileCount < inputFileCount) {
-				strcpy_s(imagePath, sizeof(imagePath), "Converted Crosshairs\\");
-				strcat_s(imagePath, sizeof(imagePath), inputCrosshair[selectedIndex- defaultFileCount]);
+				char fileName[MAXCHAR];
+				OutputDebugStringA(inputCrosshair[selectedIndex - defaultFileCount]);
+				strcpy_s(fileName, sizeof(fileName), inputCrosshair[selectedIndex - defaultFileCount]);
+				char* dotPosition = strrchr(fileName, '.');
+				*dotPosition = '\0';
+
+				snprintf(imagePath, sizeof(imagePath), "%s\\%s.bmp", convertedFolderPath, fileName);
+				OutputDebugStringA(imagePath);
 			}
 
 			//gets the overlay window handle
@@ -402,7 +427,6 @@ void readInputFiles(const char* folderPath, char*** inputCrosshair, int* fileCou
 
 	char searchPath[MAX_PATH];
 	snprintf(searchPath, sizeof(searchPath), "%s\\*", folderPath);
-	OutputDebugStringA(searchPath);
 	hFind = FindFirstFileA(searchPath, &findData);
 	if (hFind == INVALID_HANDLE_VALUE) {
 		MessageBox(NULL, L"Failed to find files in that folder", NULL, NULL);
@@ -439,7 +463,6 @@ void readInputFiles(const char* folderPath, char*** inputCrosshair, int* fileCou
 	int i = 0;
 	do {
 		if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-			//OutputDebugStringA(findData.cFileName);
 			if (strcmp(findData.cFileName, ".") != 0 && strcmp(findData.cFileName, "..") != 0) {
 				(*inputCrosshair)[i] = _strdup(findData.cFileName);
 				i++;
@@ -527,32 +550,53 @@ void writeJSONData() {
 	fclose(file);
 }
 
-void convertToBMP(char* filePath, char* outputFolder) {
-	char* fileName = strrchr(filePath, '\\');
-	fileName++;
-	char outputFileName[FILENAME_MAX];
-	snprintf(outputFileName, sizeof(outputFileName), "%s\\%s", outputFolder, fileName);
-	OutputDebugStringA(outputFileName);
+void convertToBMP(char* inputFilePath, char* outputFilePath) {
+	FreeImage_Initialise(TRUE);
 
-	FREE_IMAGE_FORMAT inputFormat = FreeImage_GetFileType(filePath, 0);
-	if (inputFormat == FIF_UNKNOWN) {
-		MessageBoxA(NULL, "Failed to get image file type", NULL, MB_OK);
+	const char* fileExtension = strrchr(inputFilePath, '.');
+	fileExtension++;
+	if (!fileExtension) {
+		MessageBoxA(NULL, "Invalid file path", NULL, MB_OK);
+		FreeImage_DeInitialise();
+		return;
 	}
 
-	FIBITMAP* inputImage = FreeImage_Load(inputFormat, filePath, 0);
+	char extUpper[5] = { 0 };
+	for (size_t i = 0; i < 5 && fileExtension[i]; i++) {
+		extUpper[i] = toupper(fileExtension[i]);
+	}
+
+	FREE_IMAGE_FORMAT inputFormat = FreeImage_GetFIFFromFormat(extUpper);
+	if (inputFormat == FIF_UNKNOWN) {
+		MessageBoxA(NULL, "Unknown image format", NULL, MB_OK);
+		FreeImage_DeInitialise();
+		return;
+	}
+	FIBITMAP* inputImage = FreeImage_Load(inputFormat, inputFilePath, 0);
 	if (!inputImage) {
 		MessageBoxA(NULL, "Failed to load image", NULL, MB_OK);
+		FreeImage_DeInitialise();
+		return;
 	}
 
-	FIBITMAP* bitmap24 = FreeImage_ConvertTo24Bits(inputImage);
-
-	FREE_IMAGE_FORMAT outputFormat = FIF_BMP;
-
-	FreeImage_Save(outputFormat, bitmap24, outputFileName, 0);
-
+	FIBITMAP* bmpImage = FreeImage_ConvertTo24Bits(inputImage);
 	FreeImage_Unload(inputImage);
-	FreeImage_Unload(bitmap24);
 
+	if (!bmpImage) {
+		OutputDebugStringA("Failed to convert image to BMP");
+		MessageBoxA(NULL, "Failed to convert image to BMP", NULL, MB_OK);
+		return;
+	}
+
+	int result = FreeImage_Save(FIF_BMP, bmpImage, outputFilePath, 0);
+	FreeImage_Unload(bmpImage);
+
+	if (!result) {
+		MessageBoxA(NULL, "Failed to save image", NULL, MB_OK);
+		return;
+	}
+
+	FreeImage_DeInitialise();
 }
 
 void getExecutableFolderPath(char* buffer, size_t size) {
@@ -577,7 +621,7 @@ HRESULT getAppDataFolderPath(LPSTR buffer, size_t size) {
 void createAppData() {
 	if (SUCCEEDED(getAppDataFolderPath(appDataPath, sizeof(appDataPath)))) {
 		char appDataSubfolder[MAX_PATH];
-		snprintf(appDataSubfolder, MAX_PATH, "%s\\CCU\0", appDataPath);
+		snprintf(appDataSubfolder, MAX_PATH, "%s\\CCU", appDataPath);
 
 		//create CCU folder within appdata
 		if (!CreateDirectoryA(appDataSubfolder, NULL)) {
