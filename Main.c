@@ -9,7 +9,6 @@
 #include "Main.h"
 
 /* TODO
-* change the location of the input files to %appdata% and update all functions that use the input file location
 * add config file option for the last status (on/off) of the crosshair
 * make crosshair look the same on screen as the image that is input in the crosshairs folder
 * add hotkeys for on off and size when implemented
@@ -44,6 +43,9 @@ How to Update Setup
 #define TOGGLE_DEFAULT_BUTTON 3 //Toggle default setting crosshair
 #define DEFAULT_DISPLAY_TEXT 4 //text that displays current default
 #define ID_IMAGE 1001 //ID for the child class that displays the image on top of the transparent window
+#define HOTKEY_ID 101 //ID for hotkey toggling crosshair
+#define HOTKEY_TIMER_ID 102 //id for hotkey timer to add delay
+#define HOTKEY_DELAY_INTERVAL 200 // timer interval in ms
 
 LRESULT CALLBACK WindProc(HWND, UINT, WPARAM, LPARAM); //main window proc
 LRESULT CALLBACK OverlayWindowProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp); //transparent overlay window proc
@@ -71,6 +73,7 @@ char convertedFolderPath[MAX_PATH]; //folder path of the Converted Crosshairs fo
 BOOLEAN isButtonOn = FALSE; //button for turning crosshair on and off
 int defaultCrosshairIndex = 0; //default crosshair index that is used to load original crosshair | take user input in the future to change
 cJSON* root = NULL; //root node of the json data
+BOOL hotkeyDelay = FALSE; //status of hotkey delay
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int cmdShow) {
 	//parent window class
@@ -194,8 +197,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 		char* dotPosition = strrchr(fileName, '.');
 		*dotPosition = '\0';
 
-		//snprintf(currentOutput, MAX_PATH, "%s\\%s.bmp", convertedFolderPath, fileName);
-		//snprintf(currentImage, MAX_PATH, "%s\\%s", inputFolderPath, inputCrosshair[i]);
 		snprintf(currentOutput, MAX_PATH, "%s\\CCU\\Converted Crosshairs\\%s.bmp", appDataPath, fileName);
 		snprintf(currentImage, MAX_PATH, "%s\\CCU\\Crosshairs\\%s", appDataPath, inputCrosshair[i]);
 		convertToBMP(currentImage, currentOutput);
@@ -232,8 +233,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	}
 	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_SETCURSEL, (WPARAM)defaultCrosshairIndex, 0); //set initial combobox selection
 
-
-
 	//set default display text
 	char buffer[200] = { 0 };
 	if (defaultCrosshairIndex < defaultFileCount) {
@@ -251,6 +250,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	SetWindowTextA(hDefaultText, buffer);
 	InvalidateRect(hDefaultText, NULL, TRUE);
 	UpdateWindow(hDefaultText);
+
+	//create hotkey for toggling crosshair
+	if (!RegisterHotKey(hWnd, HOTKEY_ID, MOD_CONTROL, 'T')) {
+		MessageBoxA(NULL, "Failed to register hot key", NULL, MB_OK);
+		return 1;
+	}
+
+	SetTimer(hWnd, HOTKEY_TIMER_ID, HOTKEY_DELAY_INTERVAL, NULL);
 	
 	MSG msg = { 0 };
 
@@ -260,6 +267,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	}
 
 	//clean up
+	UnregisterHotKey(hWnd, HOTKEY_ID);
+
+	KillTimer(hWnd, HOTKEY_TIMER_ID);
+
 	DeleteObject(hBitmap);
 
 	for (int i = 0; i < inputFileCount; i++) {
@@ -274,6 +285,32 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 
 LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 	switch (msg) {
+	case WM_HOTKEY: {
+		if (wp == HOTKEY_ID) {
+			if (!hotkeyDelay) {
+				//toggle button
+				isButtonOn = !isButtonOn;
+				HWND hOverlayImage = GetDlgItem(GetParent(hWnd), ID_IMAGE);
+
+				if (isButtonOn)
+					loadCrosshairImage();
+
+				InvalidateRect(hOverlayImage, NULL, TRUE);
+				//handle delay
+				hotkeyDelay = TRUE;
+				SetTimer(hWnd, HOTKEY_TIMER_ID, HOTKEY_DELAY_INTERVAL, NULL);
+			}
+
+		}
+		break;
+	}
+	case WM_TIMER: {
+		if (hotkeyDelay && wp == HOTKEY_TIMER_ID) {
+			KillTimer(hWnd, HOTKEY_TIMER_ID);
+			hotkeyDelay = FALSE;
+		}
+		break;
+	}
 	case WM_COMMAND: {
 		//Update image if combobox selection is changed
 		if (HIWORD(wp) == CBN_SELCHANGE && (HWND)lp == GetDlgItem(hWnd, SELECT_FILE1)) {
@@ -306,7 +343,7 @@ LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 			isButtonOn = !isButtonOn;
 			HWND hOverlayImage = GetDlgItem(GetParent(hWnd), ID_IMAGE);
 
-			if (isButtonOn)
+			if (isButtonOn) 
 				loadCrosshairImage();
 
 			InvalidateRect(hOverlayImage, NULL, TRUE);
@@ -676,8 +713,6 @@ void createAppData() {
 			return;
 		}
 
-		OutputDebugStringA(sourceFilePath);
-		OutputDebugStringA(destinationFilePath);
 		BOOL result = FreeImage_Save(FIF_BMP, image, destinationFilePath, BMP_DEFAULT);
 		if (!result) {
 			MessageBoxA(NULL, "Failed to save default image", NULL, MB_OK);
