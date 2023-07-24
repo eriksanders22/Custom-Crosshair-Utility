@@ -11,7 +11,7 @@
 /* TODO
 * add config file option for the last status (on/off) of the crosshair
 * make crosshair look the same on screen as the image that is input in the crosshairs folder
-* add hotkeys for on off and size when implemented
+* add hotkeys for size when implemented
 * upload crosshair button
 * help button
 * fix flashing screen (prob need to create smaller window for crosshair so it doesnt overlap with control)
