@@ -6,6 +6,7 @@
 #include <cJSON.h>
 #include <ShlObj.h>
 #include <WinUser.h>
+#include <ShObjIdl.h>
 #include "Main.h"
 
 /* TODO
@@ -42,6 +43,7 @@ How to Update Setup
 #define ON_OFF_BUTTON 2 //On off button ID
 #define TOGGLE_DEFAULT_BUTTON 3 //Toggle default setting crosshair
 #define DEFAULT_DISPLAY_TEXT 4 //text that displays current default
+#define UPLOAD_BUTTON 5 //button to upload new crosshairs into appdata
 #define ID_IMAGE 1001 //ID for the child class that displays the image on top of the transparent window
 #define HOTKEY_ID 101 //ID for hotkey toggling crosshair
 #define HOTKEY_TIMER_ID 102 //id for hotkey timer to add delay
@@ -58,22 +60,34 @@ void updateJSONData(); //changes data in the cJSON object that is created
 void writeJSONData(); //writes data from cJSON object into config.json
 void getExecutableFolderPath(char* buffer, size_t size); //gets the folder path of CustomCrosshair.exe
 void convertToBMP(char* inputFilePath, char* outputFilePath); //converts images to bmp format
+void addDefaultComboBoxOptions(); // adds the default combobox options
 
+//crosshair attributes
 char** inputCrosshair = NULL; //list of file names in the crosshairs folder
 int inputFileCount = 0; //list of crosshair files from Crosshairs folder
 char** defaultCrosshair = NULL; //list of default crosshair file names
 int defaultFileCount = 0; //number of default crosshairs
+
+//image handles
 HBITMAP hBitmap; //background image handle
 HBITMAP g_hCrosshair = NULL; //global crosshair image handle
+
+//paths
 char imagePath[MAX_PATH]; //file path to the crosshair image
 char configFilePath[MAX_PATH]; //file path to config.json
 LPSTR appDataPath[MAX_PATH]; //path to %appdata%
 char defaultFolderPath[MAX_PATH]; //folder path of the default crosshairs folder
 char convertedFolderPath[MAX_PATH]; //folder path of the Converted Crosshairs folder
+
+//status
 BOOLEAN isButtonOn = FALSE; //button for turning crosshair on and off
 int defaultCrosshairIndex = 0; //default crosshair index that is used to load original crosshair | take user input in the future to change
-cJSON* root = NULL; //root node of the json data
 BOOL hotkeyDelay = FALSE; //status of hotkey delay
+int crosshairXOffset = -0.5;
+int crosshairYOffset = 0;
+
+//cJSON file object
+cJSON* root = NULL; //root node of the json data
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int cmdShow) {
 	//parent window class
@@ -150,15 +164,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 	//window creation
 	HWND hTitle = CreateWindowW(L"static", L"Custom Crosshair Utility", WS_VISIBLE | WS_CHILD, 200, 50, 170, 25, hWnd, NULL, hInstance, NULL); //title window
 	HWND hOnOffButton = CreateWindowW(L"Button", L"Toggle Crosshair", WS_VISIBLE | WS_CHILD, 200, 400, 150, 40, hWnd, (HMENU) ON_OFF_BUTTON, hInstance, NULL); //on off button
+	HWND hUploadFile = CreateWindowW(L"Button", L"Upload Crosshair", WS_VISIBLE | WS_CHILD, 200, 350, 150, 25, hWnd, (HMENU)UPLOAD_BUTTON, hInstance, NULL);
 	HWND hToggleDefault = CreateWindowW(L"Button", L"Set Default Crosshair", WS_VISIBLE | WS_CHILD, 200, 450, 150, 25, hWnd, (HMENU) TOGGLE_DEFAULT_BUTTON, hInstance, NULL); //set current crosshair as default
-	HWND hDefaultText = CreateWindowW(L"static", L"", WS_VISIBLE | WS_CHILD, 200, 500, 200, 25, hWnd, (HMENU) DEFAULT_DISPLAY_TEXT, hInstance, NULL); //displays defaultCrosshairIndex
-	HWND hDropdown = CreateWindowW(L"COMBOBOX", NULL, WS_VISIBLE | WS_CHILD | CBS_DROPDOWN | CBS_HASSTRINGS | WS_VSCROLL,
-	200, 100, 150, 120, hWnd, (HMENU)SELECT_FILE1, hInstance, NULL); //dropdown
+	HWND hDefaultText = CreateWindowW(L"static", L"", WS_VISIBLE | WS_CHILD, 200, 500, 200, 50, hWnd, (HMENU) DEFAULT_DISPLAY_TEXT, hInstance, NULL); //displays defaultCrosshairIndex
+	HWND hDropdown = CreateWindowW(L"COMBOBOX", NULL, WS_VISIBLE | WS_CHILD | CBS_DROPDOWN | CBS_HASSTRINGS | WS_VSCROLL, 200, 100, 150, 120, hWnd, (HMENU)SELECT_FILE1, hInstance, NULL); //dropdown
 
 	//Default dropdown options + setting default option
-	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)"Cat");
-	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)"Dog");
-	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)"Frog");
+	//SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)"Cat");
+	//SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)"Dog");
+	//SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)"Frog");
+	addDefaultComboBoxOptions(GetDlgItem(hWnd, SELECT_FILE1));
 
 	//background image for control window
 	hBitmap = (HBITMAP)LoadImage(NULL, L"Images\\dognose.bmp", IMAGE_BITMAP, 500, 500, LR_LOADFROMFILE);
@@ -214,7 +229,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 		strcpy_s(fileName, sizeof(fileName), inputCrosshair[defaultCrosshairIndex - defaultFileCount]);
 		char* dotPosition = strrchr(fileName, '.');
 		*dotPosition = '\0';
-		OutputDebugStringA(appDataPath);
 		snprintf(imagePath, sizeof(imagePath), "%s\\CCU\\Converted Crosshairs\\%s.bmp", appDataPath, fileName);
 	}
 
@@ -231,10 +245,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 
 		SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)fileName);
 	}
-	SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_SETCURSEL, (WPARAM)defaultCrosshairIndex, 0); //set initial combobox selection
+	//SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_SETCURSEL, (WPARAM)defaultCrosshairIndex, 0); //set initial combobox selection
+	//ASAN bug on the line above
+
 
 	//set default display text
-	char buffer[200] = { 0 };
+	char buffer[200];
 	if (defaultCrosshairIndex < defaultFileCount) {
 		sprintf_s(buffer, sizeof(buffer), "Default Crosshair: %s", defaultCrosshair[defaultCrosshairIndex]);
 		int length = strlen(buffer);
@@ -285,6 +301,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hprevInstance, LPSTR cmd, int 
 
 LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 	switch (msg) {
+	case WM_CREATE: {
+		INITCOMMONCONTROLSEX icc;
+		icc.dwSize = sizeof(INITCOMMONCONTROLSEX);
+		icc.dwICC = ICC_WIN95_CLASSES;
+		InitCommonControlsEx(&icc);
+		return 0;
+	}
 	case WM_HOTKEY: {
 		if (wp == HOTKEY_ID) {
 			if (!hotkeyDelay) {
@@ -379,6 +402,83 @@ LRESULT CALLBACK WindProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 			UpdateWindow(hDefaultDisplayText);
 
 		}
+		if (HIWORD(wp) == BN_CLICKED && (HWND)lp == GetDlgItem(hWnd, UPLOAD_BUTTON)) {
+			OPENFILENAMEA ofn; // Use OPENFILENAMEA for ANSI version
+			ZeroMemory(&ofn, sizeof(ofn));
+			ofn.lStructSize = sizeof(ofn);
+			ofn.hwndOwner = hWnd;
+			ofn.lpstrFilter = "All Files\0*.*\0";
+			ofn.lpstrFile = (LPSTR)malloc(MAX_PATH);
+			ofn.nMaxFile = MAX_PATH;
+			ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+
+			if (GetOpenFileNameA(&ofn)) {
+				char filePath[MAX_PATH];
+				strcpy_s(filePath, sizeof(filePath), ofn.lpstrFile);
+				char* fileName = strrchr(filePath, '\\');
+				fileName++;
+				FREE_IMAGE_FORMAT imageFormat = FreeImage_GetFIFFromFilename(filePath);
+				if (imageFormat == FIF_UNKNOWN) {
+					MessageBoxA(NULL, "Unknown file format", NULL, MB_OK);
+					break;
+				}
+				char* fileNameNoExtension[MAX_PATH];
+				strcpy_s(fileNameNoExtension, sizeof(fileNameNoExtension), fileName);
+				char* dotPosition = strrchr(fileNameNoExtension, '.');
+				*dotPosition = '\0';
+				
+				//add file to Crosshairs
+				FreeImage_Initialise(TRUE);
+
+				char destinationFilePath[MAX_PATH];
+				snprintf(destinationFilePath, sizeof(destinationFilePath), "%s\\CCU\\Crosshairs\\%s", appDataPath, fileName);
+
+				char convertedFilePath[MAX_PATH];
+				snprintf(convertedFilePath, sizeof(convertedFilePath), "%s\\CCU\\Converted Crosshairs\\%s.bmp", appDataPath, fileNameNoExtension);
+
+				FIBITMAP* image = FreeImage_Load(imageFormat, filePath, BMP_DEFAULT);
+				if (!image) {
+					MessageBoxA(NULL, "Failed to load default image", NULL, MB_OK);
+					FreeImage_DeInitialise();
+					return;
+				}
+
+				BOOL result = FreeImage_Save(imageFormat, image, destinationFilePath, BMP_DEFAULT);
+				if (!result) {
+					MessageBoxA(NULL, "Failed to save default image", NULL, MB_OK);
+				}
+
+				FreeImage_Unload(image);
+				FreeImage_DeInitialise();
+
+				//convert files to BMP
+				convertToBMP(destinationFilePath, convertedFilePath);
+				
+				//get new inputcrosshairs folder that includes new crosshair
+				char crosshairsAppDataPath[MAX_PATH];
+				snprintf(crosshairsAppDataPath, sizeof(crosshairsAppDataPath), "%s\\CCU\\Crosshairs", appDataPath);
+				readInputFiles(crosshairsAppDataPath,&inputCrosshair, &inputFileCount);
+				
+				//reset combobox to make sure options are in order
+				SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_RESETCONTENT, 0, 0);
+				
+				//add defaults back
+				addDefaultComboBoxOptions(GetDlgItem(hWnd, SELECT_FILE1));
+
+				//add non defaults back
+				for (int i = 0; i < inputFileCount; i++) {
+					char fileName[MAXCHAR];
+					strcpy_s(fileName, sizeof(fileName), inputCrosshair[i]);
+					if (strlen(fileName) >= 4) {
+						fileName[strlen(fileName) - 4] = '\0'; //removes .bmp from the end of the name displayed in the combobox
+					}
+
+					SendMessageA(GetDlgItem(hWnd, SELECT_FILE1), CB_ADDSTRING, 0, (LPARAM)fileName);
+				}
+			}
+
+			free(ofn.lpstrFile); // Don't forget to free the memory
+		}
 		break;
 	}
 	case WM_PAINT: {
@@ -443,7 +543,7 @@ LRESULT CALLBACK OverlayWindowProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 			HDC hdcImage = CreateCompatibleDC(hdc);
 			SelectObject(hdcImage, g_hCrosshair);
 
-			BitBlt(hdc, startX, startY, imageWidth, imageHeight, hdcImage, 0, 0, SRCCOPY);
+			BitBlt(hdc, startX + crosshairXOffset, startY + crosshairYOffset, imageWidth, imageHeight, hdcImage, 0, 0, SRCCOPY);
 
 			//clean up
 			DeleteDC(hdcImage);
@@ -527,6 +627,7 @@ void loadCrosshairImage() { //loads crosshair image
 
 void loadJSONData() {
 	FILE* file;
+
 	if (fopen_s(&file, configFilePath, "r") != 0) {
 		char errorMessage[256];
 		strerror_s(errorMessage, sizeof(errorMessage), errno);
@@ -605,6 +706,7 @@ void convertToBMP(char* inputFilePath, char* outputFilePath) {
 	for (size_t i = 0; i < 5 && fileExtension[i]; i++) {
 		extUpper[i] = toupper(fileExtension[i]);
 	}
+	//OutputDebugStringA(extUpper);
 
 	FREE_IMAGE_FORMAT inputFormat = FreeImage_GetFIFFromFormat(extUpper);
 	if (inputFormat == FIF_UNKNOWN) {
@@ -612,9 +714,11 @@ void convertToBMP(char* inputFilePath, char* outputFilePath) {
 		FreeImage_DeInitialise();
 		return;
 	}
+	//OutputDebugStringA(inputFilePath);
+
 	FIBITMAP* inputImage = FreeImage_Load(inputFormat, inputFilePath, 0);
 	if (!inputImage) {
-		MessageBoxA(NULL, "Failed to load image", NULL, MB_OK);
+		MessageBoxA(NULL, "Failed to load image 123", NULL, MB_OK);
 		FreeImage_DeInitialise();
 		return;
 	}
@@ -751,4 +855,10 @@ void createAppData() {
 	else {
 		MessageBoxA(NULL, "Error getting %appdata% folder", NULL, MB_OK);
 	}
+}
+
+void addDefaultComboBoxOptions(HWND hComboBox) {
+	SendMessageA(hComboBox, CB_ADDSTRING, 0, (LPARAM)"Cat");
+	SendMessageA(hComboBox, CB_ADDSTRING, 0, (LPARAM)"Dog");
+	SendMessageA(hComboBox, CB_ADDSTRING, 0, (LPARAM)"Frog");
 }
